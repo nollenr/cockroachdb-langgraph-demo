@@ -1,0 +1,173 @@
+Read PROJECT-STATUS.md and README.md completely. This is the Product Returns LangGraph/CockroachDB demo. Follow the Cold-start TL;DR, verify the existing AWS services, and then implement the next task documented under “Immediate next step”: the presenter-visible payment resiliency/idempotency demo. Do not rebuild or reset the existing environment unless the documentation and health checks show that it is necessary. Use PuTTY/Plink—not PowerShell/OpenSSH—for AWS access, and never display the contents of keys.sh or api-key.sh.
+
+
+-- ReturnFlow resilience inspection pack.
+-- Replace 67b51aa6-7bbd-4df7-99cc-85312b5c58f9 with the UUID displayed by ReturnFlow, or use the
+-- presentation's "Copy database inspection SQL" action to receive this file
+-- with the exact UUID already embedded.
+-- Every statement is read-only and scoped through that UUID.
+
+-- 1. Workflow state, published checkpoint, and lease ownership.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id)
+SELECT
+    w.run_id,
+    w.thread_id,
+    w.graph_version,
+    w.run_status,
+    w.current_round,
+    w.next_nodes,
+    w.latest_checkpoint_id,
+    w.state_version,
+    w.next_attempt_at,
+    w.lease_generation,
+    w.lease_owner,
+    w.lease_acquired_at,
+    w.last_heartbeat_at,
+    w.lease_expires_at,
+    CASE
+        WHEN w.lease_owner IS NULL THEN 'RELEASED - no worker owns this run'
+        ELSE 'HELD - a worker currently owns this run'
+    END AS lease_state,
+    w.created_at,
+    w.updated_at
+FROM workflow_runs AS w
+JOIN target AS t ON t.run_id = w.run_id;
+
+-- 2. The durable, one-shot presenter failure plan.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id)
+SELECT
+    f.run_id,
+    f.node_name,
+    f.failure_mode,
+    f.injection_status,
+    f.created_at,
+    f.triggered_at,
+    f.resumed_at
+FROM workflow_failure_injections AS f
+JOIN target AS t ON t.run_id = f.run_id;
+
+-- 3. Node attempts. Successful siblings should appear once; the selected
+-- failure node should have one retryable_failure and, after resume, one success.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id)
+SELECT
+    n.node_name,
+    n.attempt_number,
+    n.attempt_status,
+    n.input_checkpoint_id,
+    n.output_checkpoint_id,
+    n.error_code,
+    n.error_message,
+    n.duration_ms,
+    n.trace_id,
+    n.span_id,
+    n.input_state,
+    n.output_state_delta,
+    n.output_state,
+    n.output_summary,
+    n.started_at,
+    n.finished_at
+FROM node_attempts AS n
+JOIN target AS t ON t.run_id = n.run_id
+ORDER BY n.started_at, n.node_name, n.attempt_number;
+
+-- 4. Application audit history, including failure pause and recovery request.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id)
+SELECT
+    a.sequence_number,
+    a.occurred_at,
+    a.event_type,
+    a.node_name,
+    a.actor_type,
+    a.actor_id,
+    a.checkpoint_id,
+    a.trace_id,
+    a.span_id,
+    a.event_data
+FROM audit_events AS a
+JOIN target AS t ON t.run_id = a.run_id
+ORDER BY a.sequence_number;
+
+-- 5. LangGraph checkpoint ancestry and checkpoint bookkeeping JSON.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id),
+selected_run AS (
+    SELECT w.thread_id, w.latest_checkpoint_id
+    FROM workflow_runs AS w
+    JOIN target AS t ON t.run_id = w.run_id
+)
+SELECT
+    c.thread_id,
+    c.checkpoint_ns,
+    c.checkpoint_id,
+    c.parent_checkpoint_id,
+    c.type,
+    c.created_at,
+    c.metadata,
+    c.checkpoint,
+    c.checkpoint_id = r.latest_checkpoint_id AS is_published_checkpoint
+FROM checkpoints AS c
+JOIN selected_run AS r ON r.thread_id = c.thread_id
+ORDER BY c.created_at, c.checkpoint_id;
+
+-- 6. LangGraph pending task writes. These rows preserve successful parallel
+-- sibling results when another task in the same graph step fails.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id),
+selected_run AS (
+    SELECT w.thread_id
+    FROM workflow_runs AS w
+    JOIN target AS t ON t.run_id = w.run_id
+)
+SELECT
+    p.checkpoint_ns,
+    p.checkpoint_id,
+    p.task_id,
+    p.task_path,
+    p.idx,
+    p.channel,
+    p.type,
+    length(p.blob) AS stored_bytes,
+    p.created_at
+FROM checkpoint_writes AS p
+JOIN selected_run AS r ON r.thread_id = p.thread_id
+ORDER BY p.created_at, p.checkpoint_id, p.task_id, p.idx;
+
+-- 7. Versioned channel blobs. Binary MessagePack values are intentionally
+-- reported by channel/type/size; use the companion Python inspector when a
+-- human-readable decode of every internal value is required.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id),
+selected_run AS (
+    SELECT w.thread_id
+    FROM workflow_runs AS w
+    JOIN target AS t ON t.run_id = w.run_id
+)
+SELECT
+    b.checkpoint_ns,
+    b.channel,
+    b.version,
+    b.type,
+    length(b.blob) AS stored_bytes,
+    b.created_at
+FROM checkpoint_blobs AS b
+JOIN selected_run AS r ON r.thread_id = b.thread_id
+ORDER BY b.created_at, b.channel, b.version;
+
+-- 8. Provider-owned ledger. One row/key is the payment uniqueness proof;
+-- request_count increases to two when the resumed worker repeats the request.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id)
+SELECT p.provider_refund_id, p.idempotency_key, p.refund_amount,
+       p.currency, p.provider_status, p.request_count,
+       p.first_requested_at, p.last_requested_at,
+       count(*) OVER () AS provider_refund_count
+FROM demo_payment_provider_refunds AS p
+JOIN target AS t ON t.run_id = p.run_id;
+
+-- 9. Local refund and attempt history around the external side effect.
+WITH target AS (SELECT '67b51aa6-7bbd-4df7-99cc-85312b5c58f9'::UUID AS run_id)
+SELECT r.refund_id, r.refund_status, r.idempotency_key,
+       r.provider_refund_id, r.completed_at,
+       a.attempt_number, a.attempt_status, a.provider_request_id,
+       a.provider_response, a.error_code, a.error_message,
+       a.started_at, a.finished_at
+FROM refunds AS r
+JOIN target AS t ON t.run_id = r.run_id
+LEFT JOIN refund_attempts AS a ON a.refund_id = r.refund_id
+ORDER BY a.attempt_number;

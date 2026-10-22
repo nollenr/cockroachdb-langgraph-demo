@@ -1,0 +1,68 @@
+otelcol.receiver.otlp "product_returns" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+
+  output {
+    traces = [otelcol.processor.batch.product_returns.input]
+  }
+}
+
+otelcol.processor.batch "product_returns" {
+  output {
+    traces = [otelcol.exporter.otlphttp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlphttp "tempo" {
+  client {
+    endpoint = "http://tempo:4318"
+    tls {
+      insecure = true
+    }
+  }
+}
+
+local.file_match "product_returns" {
+  path_targets = [{
+    __path__ = "/var/log/product-returns/*.jsonl",
+    job      = "product-returns",
+    service  = "product-returns",
+  }]
+}
+
+loki.source.file "product_returns" {
+  targets    = local.file_match.product_returns.targets
+  forward_to = [loki.process.product_returns.receiver]
+}
+
+loki.process "product_returns" {
+  stage.json {
+    expressions = {
+      event    = "event",
+      level    = "level",
+      node     = "node",
+      trace_id = "trace_id",
+    }
+  }
+
+  stage.labels {
+    values = {
+      event = "",
+      level = "",
+      node  = "",
+    }
+  }
+
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}

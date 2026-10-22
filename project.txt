@@ -1,0 +1,42 @@
+good morning, Cody.  I'd like to attempt to use langchain in demo project -- and I'm exploring "Graph Engineering".   There is a connector for cockroach database ,so I'd like cockroach to be the underlying database.  I'll be using AWS for the host.  it'll be AWSLinux based.  I'll give you the connection to the host along with the SSH keys o that you can directly connect to the host. I think we'll be using a standard cockroach Cluster  that I already have, but we'll need to create a new database in the standard cluster.  Would you start by creating a file in this directory (repo) that we're using that we can use to maintain status and context in case we need to close visual studio Studio Code?  Nothing will happen here locally on this Windows desktop. The only thing local will be the code repository, includinng the context file.  WinSCP will SSH everything up to the cloud to the AWS host.  I'll be running with an WinSCP so that the local repo (directory) and the host in AWS will stay in sync. Any changes we make locally will be automatically copied up. So nothing runs here locally.  Please be sure to make that clear in the context file.   Also, please use Putty to SSH up to the AWS host, not Powershell (I keep getting security exceptions when you attempt to do it that way for some reason.)   
+
+
+We'll need to start by doing things like choosing a language, probably Postgres, helping me get the things installed that I need for LangChain, including the CockroachDB connector on the host, defining the database model for things like I imagine we're going to have tables like orders, order items. We need something that we can use to figure out if there's any fraud in the account, so that what we're building will be this returns processing where a customer can say go online and say, I want to return this product that I ordered. The system will perform kind of a graph AI system where it would say, okay, let's look up the order, let's see if there's fraud on the account, and let's determine how much the refund is for. If the refund is for more than, say, $500, we need to stop and have a person, a manager, approve that return. If not, we can just move forward with the refund. Once, whether or not, if the person approves it or if it's under $500 and there's no fraud and all of those types of things, we can move forward and automatically issue that refund.
+
+Here's what I have in mind -- break the task into rounds.   
+The first round would be to classify the request as a refund request (vs. maybe a complaint).   
+
+The round might contain 3 three nodes : look up the order, find the refund policy (say up to 30 days after the purchase) and check for fraud signals.  Those 3 things could happen in parallel in this round.    If one of them fails, only that node should have to retry -- for example, if the "Fraud Signals" node fails, the results of "order lookup" and "refund policy" should be maintained.    The same mechanism should allow a "pause" as in the approval node.  
+
+The next round is to decide if we need manager approval.  If yes, let's wait.  Once approval is granted, we issue the refund, if not, we're done.    If approval is not required, let's go ahead and issue the refund.
+
+We'll want a state object stored in the database -- along with which nodes are due to run next.  Thats my checkpoint.   And a run, should be a chain of them.   
+
+While we're waiting for the manager approval (if it is required) the Nothing should be "held open".  The run is checkpointed and the process should "shut down completely".  Once the manager approves, the system loads the checkpoint, writes the approvel into the state anc carries on from the next node.   Nothing should be "held open" while waiting for the approval since the entire run was sitting in a database.    It shouldn't be treated as an exception from the outside.    
+
+If the "issue refund" node fails, it could issue a refund twice.   That's why the payment system has to have an unique label, an idempotency key built from something like the "run id" and the payment provider refuses to act twice on the same key.   That way the "Issue refund" node could start again after a failure, and not issue duplicate refunds.  
+
+The checkpoint should allow us to know what the system knew at every step -- an audit trail.   
+
+I'd like to include a "check" to be sure found a "real" return policy clause and retry the node if not -- this is to reduce the errors.  That assumes the check is sound and the steps are independant.  A narrow node with a verifier beats a long chain with none!  
+
+HOST:
+The Current IP is 3.12.107.117 and the key is located at `C:\Users\RonNollen\Documents\Key-Pairs\nollen-cockroach-revenue-us-east-2-kp01.ppk`
+
+
+Big job this morning!   we've been working on the demo opened in VSC.    Today, I would like to roll that out to a brand new AWS EC2 server.
+
+The Current IP is 3.23.64.12 and the key is located at `C:\Users\RonNollen\Documents\Key-Pairs\nollen-cockroach-revenue-us-east-2-kp01.ppk`
+
+Please use plink to connect to the EC2 instance -- for some reason we hit a security exception when using powershell.
+
+Not only is it a brand new instance (the cockroach cli isn't even installed), but the cluster is brand new as well (connection details are in the keys.sh file).   I've added the IP address to the Network Allow List.  I've also downloaded the cert into the default directory.  The cluster is ready-to-go, but the database has not yet been created and neither has the database app user.
+
+The repo is on the EC2 instance and I added `api-key.sh` with the `OPENAI_API_KEY`.   
+
+```
+export OPENAI_API_KEY="<place key value in the quotes."
+```
+
+PROJECT-STATUS.md has context you've been keeping up-to-date on this repo and README.md should have important details as well.   Start by reading those and please ask me any questions you need to help me get this rolled out.
+

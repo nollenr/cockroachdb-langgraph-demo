@@ -1,0 +1,11 @@
+# Local runtime secrets
+keys.sh*
+api-key.sh
+api-key.gpg
+presentation/node_modules/
+presentation/.next/
+presentation/.env*.local
+
+# Python-generated local artifacts
+__pycache__/
+*.py[cod]

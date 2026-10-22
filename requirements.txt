@@ -1,0 +1,27 @@
+# Core runtime dependencies for the Product Returns Graph demo.
+#
+# These direct dependencies are pinned to versions reviewed through
+# 2026-10-17. Install only on the AWS host inside the Python 3.11 virtual
+# environment. OpenAI text-embedding-3-small is selected for embeddings.
+
+langchain==1.4.1
+langgraph==1.2.12
+langchain-cockroachdb==0.4.0
+langchain-openai==1.7.2
+
+# Graph observability: OpenTelemetry exports node traces to Grafana Alloy/Tempo,
+# while prometheus-client exposes low-cardinality operational metrics.
+opentelemetry-api==1.45.1
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1
+prometheus-client==0.26.0
+
+# CockroachDBSaver uses Psycopg 3 directly. The binary distribution avoids a
+# host compiler/libpq build, and the pool supports replacing dropped
+# connections in a long-running service.
+psycopg[binary]==3.3.6
+psycopg-pool==3.3.3
+
+# Customer-facing API and durable workflow dispatcher.
+fastapi==0.156.1
+uvicorn==0.54.0

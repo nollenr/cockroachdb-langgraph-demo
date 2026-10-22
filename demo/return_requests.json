@@ -1,0 +1,44 @@
+[
+  {
+    "scenario": "eligible_under_500",
+    "customer": "CUST-RON",
+    "request": "I want to return the toaster from order DEMO-1001. It is unused and I have all the packaging.",
+    "expected_path": "eligible; automatic refund without manager approval"
+  },
+  {
+    "scenario": "manager_approval_required",
+    "customer": "CUST-SALLY",
+    "request": "Please return the Pro 900 vacuum from order DEMO-1002. It is still in good condition.",
+    "expected_path": "eligible; pause for manager approval because refund exceeds $500"
+  },
+  {
+    "scenario": "gift_card_exclusion_and_account_review",
+    "customer": "CUST-BOB",
+    "request": "I want a refund for the gift card on order DEMO-1003.",
+    "expected_path": "ineligible gift-card exception; fraud node also reports restricted account and prior returns"
+  },
+  {
+    "scenario": "activated_phone_exclusion",
+    "customer": "CUST-RON",
+    "request": "I want to return the activated iPhone from order DEMO-1004. I changed my mind.",
+    "expected_path": "ineligible activated-phone exception"
+  },
+  {
+    "scenario": "outside_return_window",
+    "customer": "CUST-SALLY",
+    "request": "I want to return the coffee maker from order DEMO-1005.",
+    "expected_path": "ineligible because purchase was more than 30 days ago"
+  },
+  {
+    "scenario": "complaint_not_return",
+    "customer": "CUST-SALLY",
+    "request": "The coffee maker from order DEMO-1005 makes too much noise. I want to complain about it.",
+    "expected_path": "classified as complaint; leave the refund graph"
+  },
+  {
+    "scenario": "unknown_order",
+    "customer": "CUST-RON",
+    "request": "Please return the toaster from order DEMO-9999.",
+    "expected_path": "order lookup fails cleanly without rerunning successful sibling nodes"
+  }
+]
